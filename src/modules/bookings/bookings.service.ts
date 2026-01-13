@@ -1,10 +1,14 @@
-import { BadRequestException, Body, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Body, forwardRef, Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from 'src/common/prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { CommissionsService } from '../commissions/commissions.service';
 
 @Injectable()
 export class BookingsService {
-    constructor(private prisma: PrismaService){}
+    constructor(private prisma: PrismaService,
+        @Inject(forwardRef(()=> CommissionsService))
+        private commissionsService: CommissionsService,
+    ){}
 
     async create(createBookingDto: CreateBookingDto){
         const hotel = await this.prisma.hotel.findUnique({
@@ -85,6 +89,17 @@ export class BookingsService {
             }
         });
 
-        return updatedBooking;
+        let commission = null;
+
+        try{
+            commission = await this.commissionsService.calculateCommission(id);
+        } catch(error) {
+            console.error('Failed to calculate commission:', error.message);
+        }
+
+        return {
+            booking: updatedBooking,
+            commission
+        }
     }
 }
