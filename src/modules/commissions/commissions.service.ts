@@ -36,6 +36,10 @@ export class CommissionsService {
             throw new BadRequestException('Commission already calculated for this booking');
         }
 
+        if (!booking.completedAt) {
+            throw new BadRequestException('Booking has no completion date');
+        }
+
         const agreement = await this.findAgreementAtDate(booking.hotelId, booking.bookingDate);
 
         if(!agreement) {
@@ -70,13 +74,14 @@ export class CommissionsService {
         let tierBonusAmount: Decimal | null = null;
         let appliedTierRule = null;
 
-        if(agreement.tierRules && agreement.tierRules.length > 0 && booking.completedAt) {
-            const monthlyCount = await this.getMonthlyCompletedBookingsCount(
+        let monthlyCount = 0;
+        if (agreement.tierRules && agreement.tierRules.length > 0) {
+            monthlyCount = await this.getMonthlyCompletedBookingsCount(
                 booking.hotelId,
                 booking.completedAt
             );
 
-            const applicableTier = agreement.tierRules.filter((rule: TierRule) => monthlyCount >= rule.minBookings).sort((a: TierRule, b: TierRule) => b.minBookings - a.minBookings)[0];
+            const applicableTier = agreement.tierRules.filter((rule: TierRule) => monthlyCount >= rule.minBookings)[0];
 
             if(applicableTier) {
                 tierBonusAmount = new Decimal(booking.amount).mul(applicableTier.bonusRate);
@@ -104,9 +109,7 @@ export class CommissionsService {
                     bookingAmount: booking.amount.toString(),
                     agreementType: agreement.type,
                     hotelStatus: booking.hotel.status,
-                    monthlyBookingCount: appliedTierRule && booking.completedAt 
-                        ? await this.getMonthlyCompletedBookingsCount(booking.hotelId, booking.completedAt) 
-                        : 0,
+                    monthlyBookingCount: monthlyCount,
                     appliedTierRule,
                     breakdown: `Base: ${baseAmount} + Preferred: ${preferredBonusAmount || 0} + Tier: ${tierBonusAmount || 0} = Total: ${totalAmount}`,
                 }
@@ -138,7 +141,7 @@ export class CommissionsService {
             include: {
                 tierRules: {
                     orderBy:{
-                        minBookings: 'asc'
+                        minBookings: 'desc'
                     }
                 }
             },
@@ -150,7 +153,6 @@ export class CommissionsService {
 
     private async getMonthlyCompletedBookingsCount(hotelId: string, completedAt: Date): Promise<number> {
         const startOfMonth = new Date(completedAt.getFullYear(),completedAt.getMonth(), 1);
-        const endOfMonth = new Date(completedAt.getFullYear(), completedAt.getMonth() + 1, 0, 23, 59, 59);
 
         return this.prisma.booking.count({
             where: {
@@ -158,9 +160,144 @@ export class CommissionsService {
                 status: 'COMPLETED',
                 completedAt: {
                     gte: startOfMonth,
-                    lte: endOfMonth
+                    lt: completedAt
                 }
             }
         });
+    }
+
+    async getMonthlySummary(month: string) {
+        const [year, monthNum] = month.split('-').map(Number);
+
+        if(!year || !monthNum || monthNum < 1 || monthNum > 12) {
+            throw new BadRequestException('Invalid month format. Use YYYY-MM');
+        }
+
+        const startDate = new Date(year, monthNum - 1, 1);
+        const endDate = new Date(year, monthNum, 0, 23, 59, 59);
+
+        const calculations = await this.prisma.commissionCalculation.findMany({
+            where: {
+                calculatedAt: {
+                    gte: startDate,
+                    lte: endDate
+                },
+            },
+            include: {
+                hotel: {
+                    select: {
+                        id: true,
+                        name: true,
+                        status: true
+                    }
+                },
+                booking: {
+                    select: {
+                        id: true,
+                        amount: true
+                    }
+                }
+            },
+            orderBy: {
+                calculatedAt: 'asc'
+            }
+        });
+
+        const hotelSummaries = new Map<string, {
+            hotelId: string;
+            hotelName: string;
+            hotelStatus: string;
+            totalCommission: Decimal;
+            bookingCount: number;
+            calculations: any[];
+        }>();
+
+        for (const calc of calculations) {
+            const hotelId = calc.hotel.id;
+            if(!hotelSummaries.has(hotelId)) {
+                hotelSummaries.set(hotelId, {
+                    hotelId: calc.hotel.id,
+                    hotelName: calc.hotel.name,
+                    hotelStatus: calc.hotel.status,
+                    totalCommission: new Decimal(0),
+                    bookingCount: 0,
+                    calculations: []
+                });
+            }
+
+            const summary = hotelSummaries.get(hotelId)!;
+            summary.totalCommission = summary.totalCommission.add(calc.totalAmount);
+            summary.bookingCount += 1;
+            summary.calculations.push({
+                bookingId: calc.booking.id,
+                bookingAmount: calc.booking.amount.toString(),
+                commission: calc.totalAmount.toString(),
+                calculatedAt: calc.calculatedAt
+            });
+        }
+
+        const grandTotal = Array.from(hotelSummaries.values()).reduce((sum, hotel) => sum.add(hotel.totalCommission), new Decimal(0));
+
+        return{
+            month,
+            period: {
+                start: startDate,
+                end: endDate
+            },
+            summary: Array.from(hotelSummaries.values()).map(hotel => ({
+                hotelId: hotel.hotelId,
+                hotelName: hotel.hotelName,
+                hotelStatus: hotel.hotelStatus,
+                totalCommission: hotel.totalCommission.toString(),
+                bookingCount: hotel.bookingCount,
+                calculations: hotel.calculations
+            })),
+            totals: {
+                totalHotels: hotelSummaries.size,
+                totalBookings: calculations.length,
+                grandTotalCommission: grandTotal.toString()
+            }
+        }
+    }
+
+    async exportMonthlySummary(month: string): Promise<string> {
+        const summary = await this.getMonthlySummary(month);
+
+        const headers = [
+            'Hotel Name',
+            'Hotel Status',
+            'Total Bookings',
+            'Total Commission (CHF)',
+            'Avg Commission (CHF)'
+        ];
+
+        const rows = summary.summary.map((hotel: any) => {
+            const avgCommission = hotel.bookingCount > 0
+                ? (parseFloat(hotel.totalCommission) / hotel.bookingCount).toFixed(2)
+                : '0.00';
+
+            return [
+                `"${hotel.hotelName}"`,
+                hotel.hotelStatus,
+                hotel.bookingCount.toString(),
+                parseFloat(hotel.totalCommission).toFixed(2),
+                avgCommission
+            ];
+        });
+
+        rows.push([
+            'TOTAL',
+            '',
+            summary.totals.totalBookings.toString(),
+            parseFloat(summary.totals.grandTotalCommission).toFixed(2),
+            ''
+        ]);
+
+        const csv = [
+            headers.join(','),
+            ...rows.map(row => row.join(','))
+        ].join('\n');
+
+        return csv;
     }
 }

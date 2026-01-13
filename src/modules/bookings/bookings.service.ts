@@ -5,10 +5,7 @@ import { CommissionsService } from '../commissions/commissions.service';
 
 @Injectable()
 export class BookingsService {
-    constructor(private prisma: PrismaService,
-        @Inject(forwardRef(()=> CommissionsService))
-        private commissionsService: CommissionsService,
-    ){}
+    constructor(private prisma: PrismaService){}
 
     async create(createBookingDto: CreateBookingDto){
         const hotel = await this.prisma.hotel.findUnique({
@@ -79,27 +76,17 @@ export class BookingsService {
         }
 
         const updatedBooking = await this.prisma.booking.update({
-            where: {id},
-            data: {
-                status: 'COMPLETED',
-                completedAt: new Date()
-            },
-            include: {
-                hotel: true
-            }
-        });
+                where: {id},
+                data: {
+                    status: 'COMPLETED',
+                    completedAt: new Date()
+                },
+                include: {
+                    hotel: true
+                }
+            });
 
-        let commission = null;
+            return updatedBooking;
 
-        try{
-            commission = await this.commissionsService.calculateCommission(id);
-        } catch(error) {
-            console.error('Failed to calculate commission:', error.message);
-        }
-
-        return {
-            booking: updatedBooking,
-            commission
-        }
     }
 }

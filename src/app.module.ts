@@ -5,7 +5,11 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { CommissionsModule } from './modules/commissions/commissions.module';
 
 @Module({
-    imports: [PrismaModule, HotelsModule, BookingsModule, CommissionsModule],
+    imports: [
+        PrismaModule,
+        HotelsModule,
+        CommissionsModule,
+        BookingsModule],
     controllers: [],
     providers: []
 })

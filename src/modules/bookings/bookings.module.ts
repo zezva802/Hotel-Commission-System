@@ -4,7 +4,7 @@ import { BookingsService } from './bookings.service';
 import { CommissionsModule } from '../commissions/commissions.module';
 
 @Module({
-  imports: [forwardRef(()=>CommissionsModule)],
+  imports: [CommissionsModule],
   controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService]

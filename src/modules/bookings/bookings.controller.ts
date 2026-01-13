@@ -1,10 +1,14 @@
 import { Body, Controller, Post, Get, Param, Patch } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { CommissionsService } from '../commissions/commissions.service';
 
 @Controller('bookings')
 export class BookingsController {
-    constructor(private readonly bookingsService: BookingsService) {}
+    constructor(
+        private readonly bookingsService: BookingsService,
+        private readonly commissionService: CommissionsService
+    ) {}
 
     @Post()
     create(@Body() createBookingDto: CreateBookingDto) {
@@ -22,7 +26,23 @@ export class BookingsController {
     }
 
     @Patch(':id/complete')
-    markAsCompleted(@Param('id') id: string) {
-        return this.bookingsService.markAsCompleted(id);
+    async markAsCompleted(@Param('id') id: string) {
+        const booking = await this.bookingsService.markAsCompleted(id);
+        let commission = null;
+        let commissionError = null;
+        try{
+            commission = await this.commissionService.calculateCommission(id);
+        } catch(error) {
+            commissionError = error.message;
+            console.error('Failed to calculate commission:', error.message);
+        }
+        return {
+            booking,
+            commission,
+            ...(commissionError && {
+                warning: 'Booking completed but commission calculation failed',
+                error: commissionError
+            })
+        };
     }
 }
