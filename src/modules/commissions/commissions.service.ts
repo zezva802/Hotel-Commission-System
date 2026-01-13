@@ -1,32 +1,28 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Decimal } from '@prisma/client/runtime/library';
-import { CommissionType, HotelStatus, BookingStatus } from '@prisma/client';
+import { CommissionType } from '@prisma/client';
 import { CommissionsRepository } from './commissions.repository';
-
-type TierRule = {
-  id: string;
-  minBookings: number;
-  bonusRate: Decimal;
-  commissionAgreementId: string;
-  createdAt: Date;
-};
+import { CommissionCalculator } from './commission.calculator';
+import { Decimal } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class CommissionsService {
-    constructor(private repository: CommissionsRepository) {}
+    constructor(
+        private repository: CommissionsRepository,
+        private calculator: CommissionCalculator,
+    ) {}
 
     async calculateCommission(bookingId: string) {
         const booking = await this.repository.findBookingById(bookingId);
 
-        if(!booking) {
+        if (!booking) {
             throw new NotFoundException(`Booking with ID ${bookingId} not found`);
         }
 
-        if(booking.status !== BookingStatus.COMPLETED) {
+        if (booking.status !== 'COMPLETED') {
             throw new BadRequestException('Booking must be completed before calculating commission');
         }
 
-        if(booking.commissionCalculation) {
+        if (booking.commissionCalculation) {
             throw new BadRequestException('Commission already calculated for this booking');
         }
 
@@ -39,69 +35,43 @@ export class CommissionsService {
             booking.bookingDate,
         );
 
-        if(!agreement) {
+        if (!agreement) {
             throw new NotFoundException(
                 `No commission agreement found for hotel ${booking.hotelId} at ${booking.bookingDate}`
             );
         }
 
-        let baseAmount: Decimal;
-        let baseRate: Decimal | null = null;
-
-        if (agreement.type === CommissionType.PERCENTAGE) {
-            if (!agreement.baseRate) {
-                throw new BadRequestException('PERCENTAGE agreement must have baseRate');
-            }
-            baseRate = agreement.baseRate;
-            baseAmount = new Decimal(booking.amount).mul(agreement.baseRate);
-        } else if (agreement.type === CommissionType.FLAT_FEE) {
-            if (!agreement.flatAmount) {
-                throw new BadRequestException('FLAT_FEE agreement must have flatAmount');
-            }
-            baseAmount = agreement.flatAmount;
-        } else {
-            throw new BadRequestException(`Unknown commission type: ${agreement.type}`);
-        }
-
-        let preferredBonusAmount: Decimal | null = null;
-        if(booking.hotel.status === HotelStatus.PREFERRED && agreement.preferredBonus) {
-            preferredBonusAmount = new Decimal(booking.amount).mul(agreement.preferredBonus);
-        }
-
-        let tierBonusAmount: Decimal | null = null;
-        let appliedTierRule = null;
-
         const monthlyCount = await this.repository.countCompletedBookings(
             booking.hotelId,
             booking.completedAt,
         );
-        
-        if (agreement.tierRules && agreement.tierRules.length > 0) {
-            const applicableTier = agreement.tierRules.filter((rule: TierRule) => monthlyCount >= rule.minBookings)[0];
 
-            if(applicableTier) {
-                tierBonusAmount = new Decimal(booking.amount).mul(applicableTier.bonusRate);
-                appliedTierRule = {
-                    minBookings: applicableTier.minBookings,
-                    bonusRate: applicableTier.bonusRate.toString()
-                };
-            }
-        }
-
-        const totalAmount = baseAmount.add(preferredBonusAmount || 0).add(tierBonusAmount || 0);
+        const result = this.calculator.calculate({
+            bookingAmount: booking.amount,
+            agreementType: agreement.type,
+            baseRate: agreement.baseRate || undefined,
+            flatAmount: agreement.flatAmount || undefined,
+            hotelStatus: booking.hotel.status,
+            preferredBonus: agreement.preferredBonus || undefined,
+            tierRules: agreement.tierRules.map((rule) => ({
+                minBookings: rule.minBookings,
+                bonusRate: rule.bonusRate,
+            })),
+            monthlyBookingCount: monthlyCount,
+        });
 
         const calculation = await this.repository.saveCalculation({
             bookingId: booking.id,
             hotelId: booking.hotelId,
             commissionAgreementId: agreement.id,
-            baseAmount,
-            baseRate,
-            preferredBonus: preferredBonusAmount,
-            tierBonus: tierBonusAmount,
-            totalAmount,
+            baseAmount: result.baseAmount,
+            baseRate: result.baseRate,
+            preferredBonus: result.preferredBonus,
+            tierBonus: result.tierBonus,
+            totalAmount: result.totalAmount,
             calculationDetails: {
                 monthlyBookingCount: monthlyCount,
-                appliedTierRule,
+                appliedTierRule: result.appliedTierRule,
             },
         });
 
@@ -111,7 +81,7 @@ export class CommissionsService {
     async getMonthlySummary(month: string) {
         const [year, monthNum] = month.split('-').map(Number);
 
-        if(!year || !monthNum || monthNum < 1 || monthNum > 12) {
+        if (!year || !monthNum || monthNum < 1 || monthNum > 12) {
             throw new BadRequestException('Invalid month format. Use YYYY-MM');
         }
 
@@ -134,7 +104,7 @@ export class CommissionsService {
 
         for (const calc of calculations) {
             const hotelId = calc.hotel.id;
-            if(!hotelSummaries.has(hotelId)) {
+            if (!hotelSummaries.has(hotelId)) {
                 hotelSummaries.set(hotelId, {
                     hotelId: calc.hotel.id,
                     hotelName: calc.hotel.name,
@@ -156,7 +126,10 @@ export class CommissionsService {
             });
         }
 
-        const grandTotal = Array.from(hotelSummaries.values()).reduce((sum, hotel) => sum.add(hotel.totalCommission), new Decimal(0));
+        const grandTotal = Array.from(hotelSummaries.values()).reduce(
+            (sum, hotel) => sum.add(hotel.totalCommission),
+            new Decimal(0)
+        );
 
         return {
             month,
