@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hotel-commission-db
+    restart: unless-stopped
+    ports:
+      - "5432-5432"
+    environment:
+      POSTGRES_USER: commission_user
+      POSTGRES_PASSWORD: commission_pass
+      POSTGRES_DB: hotel_commission_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:

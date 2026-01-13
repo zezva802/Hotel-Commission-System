@@ -1,0 +1,115 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Hotel {
+  id        String   @id @default(uuid())
+  name      String
+  status    String   @default("STANDARD")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  commissionAgreements CommissionAgreement[]
+  bookings             Booking[]
+  commissionCalculations CommissionCalculation[]  
+
+  @@map("hotels")
+}
+
+model CommissionAgreement {
+  id             String    @id @default(uuid())
+  hotelId        String
+  hotel          Hotel     @relation(fields: [hotelId], references: [id])
+  
+  type           String
+  baseRate       Decimal?  @db.Decimal(5, 4)
+  flatAmount     Decimal?  @db.Decimal(10, 2)
+  preferredBonus Decimal?  @db.Decimal(5, 4)
+  
+  validFrom      DateTime
+  validTo        DateTime?
+  isActive       Boolean   @default(true)
+  
+  createdAt      DateTime  @default(now())
+
+  tierRules      TierRule[]
+  commissionCalculations CommissionCalculation[]
+
+  @@index([hotelId, validFrom, validTo, isActive])
+  @@index([hotelId, isActive])
+
+  @@map("commission_agreements")
+}
+
+model TierRule {
+  id                    String              @id @default(uuid())
+  commissionAgreementId String
+  commissionAgreement   CommissionAgreement @relation(fields: [commissionAgreementId], references: [id])
+  
+  minBookings           Int
+  bonusRate             Decimal             @db.Decimal(5, 4)
+  
+  createdAt             DateTime            @default(now())
+
+  @@map("tier_rules")
+}
+
+model Booking {
+  id          String   @id @default(uuid())
+  hotelId     String
+  hotel       Hotel    @relation(fields: [hotelId], references: [id])
+  
+  amount      Decimal  @db.Decimal(10, 2)
+  status      String   @default("PENDING")
+  
+  bookingDate DateTime @default(now())
+  completedAt DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  commissionCalculation CommissionCalculation?
+
+  @@index([hotelId, status, completedAt])
+  @@index([hotelId, completedAt])
+
+  @@map("bookings")
+}
+
+model CommissionCalculation {
+  id                    String              @id @default(uuid())
+  
+  bookingId             String              @unique
+  booking               Booking             @relation(fields: [bookingId], references: [id])
+  hotelId               String
+  hotel                 Hotel               @relation(fields: [hotelId], references: [id])
+  commissionAgreementId String
+  commissionAgreement   CommissionAgreement @relation(fields: [commissionAgreementId], references: [id])
+  
+  baseAmount            Decimal             @db.Decimal(10, 2)
+  baseRate              Decimal?            @db.Decimal(5, 4)
+  preferredBonus        Decimal?            @db.Decimal(10, 2)
+  tierBonus             Decimal?            @db.Decimal(10, 2)
+  totalAmount           Decimal             @db.Decimal(10, 2)
+  
+  calculationDetails    Json?
+  
+  calculatedAt          DateTime            @default(now())
+
+  @@index([hotelId, calculatedAt])
+  @@index([calculatedAt])
+
+  @@map("commission_calculations")
+}
