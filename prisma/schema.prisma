@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,37 +7,55 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Hotel {
-  id        String   @id @default(uuid())
-  name      String
-  status    String   @default("STANDARD")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
-  commissionAgreements CommissionAgreement[]
-  bookings             Booking[]
-  commissionCalculations CommissionCalculation[]  
+enum HotelStatus {
+  STANDARD
+  PREFERRED
+}
+
+enum CommissionType {
+  PERCENTAGE
+  FLAT_FEE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+model Hotel {
+  id        String      @id @default(uuid())
+  name      String
+  status    HotelStatus @default(STANDARD)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  commissionAgreements   CommissionAgreement[]
+  bookings               Booking[]
+  commissionCalculations CommissionCalculation[]
 
   @@map("hotels")
 }
 
 model CommissionAgreement {
-  id             String    @id @default(uuid())
+  id             String         @id @default(uuid())
   hotelId        String
-  hotel          Hotel     @relation(fields: [hotelId], references: [id])
+  hotel          Hotel          @relation(fields: [hotelId], references: [id])
   
-  type           String
-  baseRate       Decimal?  @db.Decimal(5, 4)
-  flatAmount     Decimal?  @db.Decimal(10, 2)
-  preferredBonus Decimal?  @db.Decimal(5, 4)
+  type           CommissionType
+  baseRate       Decimal?       @db.Decimal(5, 4)
+  flatAmount     Decimal?       @db.Decimal(10, 2)
+  preferredBonus Decimal?       @db.Decimal(5, 4)
   
   validFrom      DateTime
   validTo        DateTime?
-  isActive       Boolean   @default(true)
+  isActive       Boolean        @default(true)
   
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime       @default(now())
 
-  tierRules      TierRule[]
+  tierRules              TierRule[]
   commissionCalculations CommissionCalculation[]
 
   @@index([hotelId, validFrom, validTo, isActive])
@@ -55,29 +67,30 @@ model CommissionAgreement {
 model TierRule {
   id                    String              @id @default(uuid())
   commissionAgreementId String
-  commissionAgreement   CommissionAgreement @relation(fields: [commissionAgreementId], references: [id])
+  commissionAgreement   CommissionAgreement @relation(fields: [commissionAgreementId], references: [id], onDelete: Cascade)
   
   minBookings           Int
   bonusRate             Decimal             @db.Decimal(5, 4)
   
   createdAt             DateTime            @default(now())
 
+  @@index([commissionAgreementId])
   @@map("tier_rules")
 }
 
 model Booking {
-  id          String   @id @default(uuid())
+  id          String        @id @default(uuid())
   hotelId     String
-  hotel       Hotel    @relation(fields: [hotelId], references: [id])
+  hotel       Hotel         @relation(fields: [hotelId], references: [id])
   
-  amount      Decimal  @db.Decimal(10, 2)
-  status      String   @default("PENDING")
+  amount      Decimal       @db.Decimal(10, 2)
+  status      BookingStatus @default(PENDING)
   
-  bookingDate DateTime @default(now())
+  bookingDate DateTime      @default(now())
   completedAt DateTime?
   
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   commissionCalculation CommissionCalculation?
 

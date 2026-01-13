@@ -1,16 +1,16 @@
-import { IsArray, IsDateString, IsEnum, IsNumber, IsOptional, ValidateNested} from "class-validator";
+import { IsArray, IsDateString, IsEnum, IsNumber, IsOptional, Max, Min, ValidateNested} from "class-validator";
 import { Type } from "class-transformer";
+import { CommissionType } from "@prisma/client";
 
-export enum CommissionType {
-    PERCNTAGE = 'PERCENTAGE',
-    FLAT_FEE = 'FLAT_FEE',
-}
 
 export class CreateTierRuleDto {
     @IsNumber()
+    @Min(1)
     minBookings: number;
 
     @IsNumber()
+    @Min(0)
+    @Max(1)
     bonusRate: number;
 }
 
@@ -20,14 +20,19 @@ export class CreateCommissionAgreementDto {
 
     @IsOptional()
     @IsNumber()
+    @Min(0)
+    @Max(1)
     baseRate?:number;
 
     @IsOptional()
     @IsNumber()
+    @Min(0)
     flatAmount?:number;
 
     @IsOptional()
     @IsNumber()
+    @Min(0)
+    @Max(1)
     preferredBonus?:number;
 
     @IsDateString()

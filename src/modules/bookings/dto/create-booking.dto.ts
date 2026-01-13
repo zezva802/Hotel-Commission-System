@@ -1,10 +1,11 @@
-import { IsDateString, IsOptional, IsString, IsNumber } from "class-validator";
+import { IsDateString, IsOptional, IsString, IsNumber, IsUUID, Min } from "class-validator";
 
 export class CreateBookingDto {
-    @IsString()
+    @IsUUID('4')
     hotelId: string;
 
-    @IsNumber()
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(0.01)
     amount: number;
 
     @IsOptional()

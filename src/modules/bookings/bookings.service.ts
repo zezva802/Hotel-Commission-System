@@ -1,63 +1,37 @@
-import { BadRequestException, Body, forwardRef, Injectable, NotFoundException, Inject } from '@nestjs/common';
-import { PrismaService } from 'src/common/prisma/prisma.service';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateBookingDto } from './dto/create-booking.dto';
-import { CommissionsService } from '../commissions/commissions.service';
+import { BookingStatus } from '@prisma/client';
+import { BookingsRepository } from './bookings.repository';
 
 @Injectable()
 export class BookingsService {
-    constructor(private prisma: PrismaService){}
+    constructor(private repository: BookingsRepository) {}
 
-    async create(createBookingDto: CreateBookingDto){
-        const hotel = await this.prisma.hotel.findUnique({
-            where:{id: createBookingDto.hotelId}
-        });
-        if(!hotel) {
+    async create(createBookingDto: CreateBookingDto) {
+        const hotel = await this.repository.findHotelById(createBookingDto.hotelId);
+
+        if (!hotel) {
             throw new NotFoundException(`Hotel with ID ${createBookingDto.hotelId} not found`);
         }
 
-        const booking = await this.prisma.booking.create({
-            data: {
-                hotelId: createBookingDto.hotelId,
-                amount: createBookingDto.amount,
-                bookingDate: createBookingDto.bookingDate ? new Date(createBookingDto.bookingDate) : new Date(),
-                status: 'PENDING'
-            },
-            include: {
-                hotel: true,
-            }
-        });
-
-        return booking;
-    }
-
-    async findAll(){
-        return this.prisma.booking.findMany({
-            include: {
-                hotel: {
-                    select: {
-                        id: true,
-                        name: true,
-                        status: true,
-                    }
-                },
-                commissionCalculation: true
-            },
-            orderBy: {
-                createdAt: 'desc'
-            }
+        return this.repository.create({
+            hotelId: createBookingDto.hotelId,
+            amount: createBookingDto.amount,
+            bookingDate: createBookingDto.bookingDate
+                ? new Date(createBookingDto.bookingDate)
+                : new Date(),
+            status: BookingStatus.PENDING,
         });
     }
 
-    async findOne(id: string){
-        const booking = await this.prisma.booking.findUnique({
-            where: {id},
-            include: {
-                hotel: true,
-                commissionCalculation: true
-            }
-        });
+    async findAll() {
+        return this.repository.findAll();
+    }
 
-        if(!booking) {
+    async findOne(id: string) {
+        const booking = await this.repository.findById(id);
+
+        if (!booking) {
             throw new NotFoundException(`Booking with ID ${id} not found`);
         }
 
@@ -67,26 +41,17 @@ export class BookingsService {
     async markAsCompleted(id: string) {
         const booking = await this.findOne(id);
 
-        if(booking.status === 'COMPLETED') {
+        if (booking.status === BookingStatus.COMPLETED) {
             throw new BadRequestException('Booking is already completed');
         }
 
-        if(booking.status === 'CANCELLED') {
+        if (booking.status === BookingStatus.CANCELLED) {
             throw new BadRequestException('Cannot complete a cancelled booking');
         }
 
-        const updatedBooking = await this.prisma.booking.update({
-                where: {id},
-                data: {
-                    status: 'COMPLETED',
-                    completedAt: new Date()
-                },
-                include: {
-                    hotel: true
-                }
-            });
-
-            return updatedBooking;
-
+        return this.repository.update(id, {
+            status: BookingStatus.COMPLETED,
+            completedAt: new Date(),
+        });
     }
 }

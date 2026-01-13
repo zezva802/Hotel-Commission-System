@@ -1,12 +1,10 @@
-import { IsEnum, IsString } from "class-validator";
+import { IsEnum, IsNotEmpty, IsString } from "class-validator";
+import {HotelStatus} from '@prisma/client';
 
-export enum HotelStatus {
-    STANDART = 'STANDARD',
-    PREFERRED = 'PREFERRED',
-}
 
 export class CreateHotelDto{
     @IsString()
+    @IsNotEmpty()
     name: string;
 
     @IsEnum(HotelStatus)

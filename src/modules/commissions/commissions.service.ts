@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from 'src/common/prisma/prisma.service';
 import { Decimal } from '@prisma/client/runtime/library';
-
+import { CommissionType, HotelStatus, BookingStatus } from '@prisma/client';
+import { CommissionsRepository } from './commissions.repository';
 
 type TierRule = {
   id: string;
@@ -13,22 +13,16 @@ type TierRule = {
 
 @Injectable()
 export class CommissionsService {
-    constructor(private prisma: PrismaService) {}
+    constructor(private repository: CommissionsRepository) {}
 
     async calculateCommission(bookingId: string) {
-        const booking = await this.prisma.booking.findUnique({
-            where: {id: bookingId},
-            include: {
-                hotel: true,
-                commissionCalculation: true
-            }
-        });
+        const booking = await this.repository.findBookingById(bookingId);
 
         if(!booking) {
             throw new NotFoundException(`Booking with ID ${bookingId} not found`);
         }
 
-        if(booking.status !== 'COMPLETED') {
+        if(booking.status !== BookingStatus.COMPLETED) {
             throw new BadRequestException('Booking must be completed before calculating commission');
         }
 
@@ -40,7 +34,10 @@ export class CommissionsService {
             throw new BadRequestException('Booking has no completion date');
         }
 
-        const agreement = await this.findAgreementAtDate(booking.hotelId, booking.bookingDate);
+        const agreement = await this.repository.findActiveAgreement(
+            booking.hotelId,
+            booking.bookingDate,
+        );
 
         if(!agreement) {
             throw new NotFoundException(
@@ -51,13 +48,13 @@ export class CommissionsService {
         let baseAmount: Decimal;
         let baseRate: Decimal | null = null;
 
-        if (agreement.type === 'PERCENTAGE') {
+        if (agreement.type === CommissionType.PERCENTAGE) {
             if (!agreement.baseRate) {
                 throw new BadRequestException('PERCENTAGE agreement must have baseRate');
             }
             baseRate = agreement.baseRate;
             baseAmount = new Decimal(booking.amount).mul(agreement.baseRate);
-        } else if (agreement.type === 'FLAT_FEE') {
+        } else if (agreement.type === CommissionType.FLAT_FEE) {
             if (!agreement.flatAmount) {
                 throw new BadRequestException('FLAT_FEE agreement must have flatAmount');
             }
@@ -67,20 +64,19 @@ export class CommissionsService {
         }
 
         let preferredBonusAmount: Decimal | null = null;
-        if(booking.hotel.status === 'PREFERRED' && agreement.preferredBonus) {
+        if(booking.hotel.status === HotelStatus.PREFERRED && agreement.preferredBonus) {
             preferredBonusAmount = new Decimal(booking.amount).mul(agreement.preferredBonus);
         }
 
         let tierBonusAmount: Decimal | null = null;
         let appliedTierRule = null;
 
-        let monthlyCount = 0;
+        const monthlyCount = await this.repository.countCompletedBookings(
+            booking.hotelId,
+            booking.completedAt,
+        );
+        
         if (agreement.tierRules && agreement.tierRules.length > 0) {
-            monthlyCount = await this.getMonthlyCompletedBookingsCount(
-                booking.hotelId,
-                booking.completedAt
-            );
-
             const applicableTier = agreement.tierRules.filter((rule: TierRule) => monthlyCount >= rule.minBookings)[0];
 
             if(applicableTier) {
@@ -90,80 +86,26 @@ export class CommissionsService {
                     bonusRate: applicableTier.bonusRate.toString()
                 };
             }
-
         }
 
         const totalAmount = baseAmount.add(preferredBonusAmount || 0).add(tierBonusAmount || 0);
 
-        const calculation = await this.prisma.commissionCalculation.create({
-            data: {
-                bookingId: booking.id,
-                hotelId: booking.hotelId,
-                commissionAgreementId: agreement.id,
-                baseAmount,
-                baseRate,
-                preferredBonus: preferredBonusAmount,
-                tierBonus: tierBonusAmount,
-                totalAmount,
-                calculationDetails: {
-                    bookingAmount: booking.amount.toString(),
-                    agreementType: agreement.type,
-                    hotelStatus: booking.hotel.status,
-                    monthlyBookingCount: monthlyCount,
-                    appliedTierRule,
-                    breakdown: `Base: ${baseAmount} + Preferred: ${preferredBonusAmount || 0} + Tier: ${tierBonusAmount || 0} = Total: ${totalAmount}`,
-                }
+        const calculation = await this.repository.saveCalculation({
+            bookingId: booking.id,
+            hotelId: booking.hotelId,
+            commissionAgreementId: agreement.id,
+            baseAmount,
+            baseRate,
+            preferredBonus: preferredBonusAmount,
+            tierBonus: tierBonusAmount,
+            totalAmount,
+            calculationDetails: {
+                monthlyBookingCount: monthlyCount,
+                appliedTierRule,
             },
-            include: {
-                booking: true,
-                hotel: true,
-                commissionAgreement: {
-                    include: {
-                        tierRules: true
-                    }
-                }
-            }
         });
 
         return calculation;
-    }
-
-    private async findAgreementAtDate(hotelId: string, date: Date) {
-        return this.prisma.commissionAgreement.findFirst({
-            where: {
-                hotelId,
-                validFrom: {lte: date},
-                OR: [
-                    {validTo: null},
-                    {validTo: {gte: date}}
-                ],
-            },
-            include: {
-                tierRules: {
-                    orderBy:{
-                        minBookings: 'desc'
-                    }
-                }
-            },
-            orderBy: {
-                validFrom: 'desc'
-            },
-        });
-    }
-
-    private async getMonthlyCompletedBookingsCount(hotelId: string, completedAt: Date): Promise<number> {
-        const startOfMonth = new Date(completedAt.getFullYear(),completedAt.getMonth(), 1);
-
-        return this.prisma.booking.count({
-            where: {
-                hotelId,
-                status: 'COMPLETED',
-                completedAt: {
-                    gte: startOfMonth,
-                    lt: completedAt
-                }
-            }
-        });
     }
 
     async getMonthlySummary(month: string) {
@@ -176,32 +118,10 @@ export class CommissionsService {
         const startDate = new Date(year, monthNum - 1, 1);
         const endDate = new Date(year, monthNum, 0, 23, 59, 59);
 
-        const calculations = await this.prisma.commissionCalculation.findMany({
-            where: {
-                calculatedAt: {
-                    gte: startDate,
-                    lte: endDate
-                },
-            },
-            include: {
-                hotel: {
-                    select: {
-                        id: true,
-                        name: true,
-                        status: true
-                    }
-                },
-                booking: {
-                    select: {
-                        id: true,
-                        amount: true
-                    }
-                }
-            },
-            orderBy: {
-                calculatedAt: 'asc'
-            }
-        });
+        const calculations = await this.repository.findCalculationsByMonth(
+            startDate,
+            endDate
+        );
 
         const hotelSummaries = new Map<string, {
             hotelId: string;
@@ -238,7 +158,7 @@ export class CommissionsService {
 
         const grandTotal = Array.from(hotelSummaries.values()).reduce((sum, hotel) => sum.add(hotel.totalCommission), new Decimal(0));
 
-        return{
+        return {
             month,
             period: {
                 start: startDate,
@@ -257,7 +177,7 @@ export class CommissionsService {
                 totalBookings: calculations.length,
                 grandTotalCommission: grandTotal.toString()
             }
-        }
+        };
     }
 
     async exportMonthlySummary(month: string): Promise<string> {
