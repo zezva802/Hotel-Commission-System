@@ -227,6 +227,20 @@ describe('CommissionCalculator', () => {
       expect(result.totalAmount.toNumber()).toBe(130);
     });
 
+    it('should handle zero booking amount', () => {
+    const result = calculator.calculate({
+        bookingAmount: new Decimal(0),
+        agreementType: CommissionType.PERCENTAGE,
+        baseRate: new Decimal(0.10),
+        hotelStatus: HotelStatus.STANDARD,
+        tierRules: [],
+        monthlyBookingCount: 0,
+    });
+
+    expect(result.baseAmount.toNumber()).toBe(0);
+    expect(result.totalAmount.toNumber()).toBe(0);
+    });
+
     it('should calculate Hotel Schweizerhof scenario', () => {
       const result = calculator.calculate({
         bookingAmount: new Decimal(1000),

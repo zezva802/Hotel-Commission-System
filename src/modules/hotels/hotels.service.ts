@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHotelDto } from './dto/create-hotel.dto';
 import { CreateCommissionAgreementDto } from './dto/create-commission-agreement.dto';
+import { UpdateCommissionAgreementDto } from './dto/update-commission-agreement.dto';
 import { HotelsRepository } from './hotels.repository';
 
 @Injectable()
@@ -54,6 +55,48 @@ export class HotelsService {
                 }
                 : undefined,
         });
+    }
+
+    async updateCommissionAgreement(hotelId: string, dto: UpdateCommissionAgreementDto) {
+        await this.findOne(hotelId);
+
+        const currentAgreement = await this.repository.findActiveAgreement(hotelId);
+
+        if (!currentAgreement) {
+            throw new NotFoundException(`No active commission agreement found for hotel ${hotelId}`);
+        }
+
+        const now = new Date();
+        
+        await this.repository.deactivateAgreements(hotelId, now);
+
+        const newAgreement = {
+            hotelId,
+            type: dto.type ?? currentAgreement.type,
+            baseRate: dto.baseRate ?? currentAgreement.baseRate,
+            flatAmount: dto.flatAmount ?? currentAgreement.flatAmount,
+            preferredBonus: dto.preferredBonus ?? currentAgreement.preferredBonus,
+            validFrom: dto.validFrom ? new Date(dto.validFrom) : now,
+            validTo: dto.validTo ? new Date(dto.validTo) : null,
+            isActive: true,
+            tierRules: dto.tierRules
+                ? {
+                    create: dto.tierRules.map((rule) => ({
+                        minBookings: rule.minBookings,
+                        bonusRate: rule.bonusRate,
+                    })),
+                }
+                : currentAgreement.tierRules.length > 0
+                ? {
+                    create: currentAgreement.tierRules.map((rule) => ({
+                        minBookings: rule.minBookings,
+                        bonusRate: rule.bonusRate,
+                    })),
+                }
+                : undefined,
+        };
+
+        return this.repository.createAgreement(newAgreement);
     }
 
     async getActiveCommissionAgreement(hotelId: string) {

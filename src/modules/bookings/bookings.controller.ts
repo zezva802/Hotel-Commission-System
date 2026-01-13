@@ -45,4 +45,9 @@ export class BookingsController {
             })
         };
     }
+
+    @Post(':id/calculate-commission')
+    calculateCommission(@Param('id') bookingId: string) {
+        return this.commissionService.calculateCommission(bookingId);
+    }
 }

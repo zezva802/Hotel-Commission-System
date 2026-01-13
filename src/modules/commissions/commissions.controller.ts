@@ -31,9 +31,4 @@ export class CommissionsController {
         
         res.send(csv);
     }
-
-    @Post('calculate/:bookingId')
-    calculateCommission(@Param('bookingId') bookingId: string) {
-        return this.commissionsService.calculateCommission(bookingId);
-    }
 }

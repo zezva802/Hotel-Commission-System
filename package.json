@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "test:e2e": "dotenv -e .env.test -- jest --config ./test/jest-e2e.json",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
@@ -31,6 +32,7 @@
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.0.6",
+    "dotenv-cli": "^11.0.0",
     "prisma": "^5.22.0",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",

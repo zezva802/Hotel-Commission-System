@@ -1,7 +1,9 @@
-import { Controller, Post, Body, Get, Param } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Patch } from '@nestjs/common';
 import { HotelsService } from './hotels.service';
 import { CreateHotelDto } from './dto/create-hotel.dto';
 import { CreateCommissionAgreementDto } from './dto/create-commission-agreement.dto';
+import { UpdateCommissionAgreementDto } from './dto/update-commission-agreement.dto';
+
 
 @Controller('hotels')
 export class HotelsController {
@@ -17,7 +19,7 @@ export class HotelsController {
         return this.hotelsService.findAll();
     }
 
-    @Post(':id/commission-agreements')
+    @Post(':id/commission-agreement')
     createCommissionAgreement(
         @Param('id') hotelId: string,
         @Body() createCommissionAgreementDto: CreateCommissionAgreementDto
@@ -25,9 +27,17 @@ export class HotelsController {
         return this.hotelsService.createCommissionAgreement(hotelId, createCommissionAgreementDto);
     }
 
-    @Get(':id/commission-agreements')
+    @Get(':id/commission-agreement')
     getActiveCommissionAgreement(@Param('id') hotelId: string) {
         return this.hotelsService.getActiveCommissionAgreement(hotelId);
+    }
+
+    @Patch(':id/commission-agreement')
+    updateCommissionAgreement(
+        @Param('id') hotelId: string,
+        @Body() updateDto: UpdateCommissionAgreementDto
+    ) {
+        return this.hotelsService.updateCommissionAgreement(hotelId, updateDto);
     }
 
     @Get(':id')
